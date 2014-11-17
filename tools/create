@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# FIXME: check that repository doesn't already exist *on GitHub*.
-# FIXME: collaborators are *not* being set up.
-# FIXME: check to see if we're already in a Git repo isn't working.
-
 ## Create a website for a new workshop.
 ##
 ## Usage:
@@ -14,8 +10,9 @@
 ##
 ## - workshop_id: the identifier provide by Software Carpentry for the
 ##   workshop that you will be running. It will be used for the name of
-##   the Git repository and is a name like YYYY-MM-DD-site, e.g.,
-##   '2015-06-18-esu'.
+##   the Git repository and must be formated as YYYY-MM-DD-site, e.g.,
+##   '2015-06-18-esu'. The year, month, day, and site must be separated
+##   by hyphens rather than underscores or some other character.
 ##
 ## - title: the title of the workshop that you will be running.
 ##   It should be multi-word and must be enclose with single or double
@@ -46,17 +43,33 @@
 
 # Check that the current working directory is *not* already a Git repo.
 function check_pwd {
-    if test $(git status > /dev/null 2>&1)
+    success=$(git status > /dev/null 2>&1; echo $?)
+    if [[ ${success} -eq 0 ]];
     then
         echo "ERROR: you are already inside a Git repository."
         exit 2
     fi
 }
 
+function check_hyphens {
+  success=$(echo ${WORKSHOP_ID} | grep -v "-" > /dev/null 2>&1; echo $?)
+  if [[ ${success} -eq 0 ]];
+  then
+      echo "ERROR: workshop_id must contain hyphens for the date."
+      exit 2
+  fi
+}
+
 # Create the remote repository.
 function create_repo {
     url=https://api.github.com/user/repos
     ghpages=https://${OWNER}.github.io/${WORKSHOP_ID}
+    curl -s --head ${ghpages} | head -n 1 | grep "HTTP/1.[01] [23].."
+    if test $? -ne 1
+    then
+        echo "ERROR: this repository already exists"
+        exit $?
+    fi
     curl -s -f -u "${OWNER}:${PASSWORD}" \
         -d "{\"name\":\"${WORKSHOP_ID}\",\"title\":\"${TITLE}\",\"homepage\":\"${ghpages}\"${REPOSITORY_DEFAULTS}}" \
         ${url} > /dev/null
@@ -82,16 +95,21 @@ function set_team {
 
 # Clone the template directory, setting it as the upstream, and push
 # the cloned material to the repository for this workshop.
-# FIXME: should check that 'git clone' worked correctly before trying
-# to 'cd'.
 function clone_and_push {
     git clone -b gh-pages -o upstream \
         https://github.com/${WORKSHOP_TEMPLATE_SRC}.git ${REPOSITORY_PATH}
-    cd ${REPOSITORY_PATH}
-    git remote add origin \
-        ${WORKSHOP_URL/https:\/\//https:\/\/${OWNER}@}.git
-    git config credential.username ${OWNER}
-    git push -u origin gh-pages
+    if test $? -eq 0
+    then
+        cd ${REPOSITORY_PATH}
+        git remote add origin \
+            ${WORKSHOP_URL/https:\/\//https:\/\/${OWNER}@}.git
+        git config credential.username ${OWNER}
+        git push -u origin gh-pages
+    else
+        echo "Error when cloning https://github.com/${WORKSHOP_TEMPLATE_SRC}.git"
+        echo "Please remove ${REPOSITORY_PATH} and try again"
+        exit $?
+    fi
 }
 
 # Report what was done.
@@ -104,13 +122,14 @@ function end_message {
     echo "TODO:"
     echo ""
     echo "1. Update ${REPOSITORY_PATH}/index.html"
-    echo "2. Run tools/check to make sure everything conforms"
+    echo "2. Run tools/check.py on ${REPOSITORY_PATH}/index.html to make sure everything conforms"
     echo "3. Push changes to the gh-pages branch"
 }
 
 # Main driver.
 function main {
     check_pwd
+    check_hyphens
     create_repo
     set_team
     clone_and_push
@@ -121,7 +140,7 @@ function main {
 if test $# -lt 3
 then
     echo ""
-    sed -n 's/^## //p' $0
+    sed -n 's/^##//p' $0
     echo ""
     exit 1
 fi
@@ -132,7 +151,7 @@ WORKSHOP_ID=$1
 REPOSITORY_PATH=./$1
 TITLE="$2"
 OWNER=$3
-INSTRUCTORS=${OWNER} ${@:4}
+INSTRUCTORS="${OWNER} ${@:4}"
 WORKSHOP_URL=https://github.com/${OWNER}/${WORKSHOP_ID}
 REPOSITORY_DEFAULTS=,\"has_issues\":false,\"has_wiki\":false,\"has_downloads\":false
 
